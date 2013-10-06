@@ -1,42 +1,42 @@
 package pebblemon
 
 import (
-	"io"
-	"net/http"
+	"appengine"
+	"appengine/datastore"
+	"appengine/urlfetch"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"bytes"
-	"appengine"
-	"appengine/urlfetch"
-	"appengine/datastore"
+	"io"
 	"log"
+	"net/http"
 )
 
 var API_KEY string = "CENSORED"
 
 type GCMSend struct {
-	Data map[string]string `json:"data"`
-	RegistrationIds []string `json:"registration_ids"`
-	DryRun bool `json:"dry_run,omitempty"`
+	Data            map[string]string `json:"data"`
+	RegistrationIds []string          `json:"registration_ids"`
+	DryRun          bool              `json:"dry_run,omitempty"`
 }
 
 type GCMResponse struct {
-	MulticastId int64 `json:"multicast_id"`
-	Success int `json:"success"`
-	Failure int `json:"failure"`
-	CanonicalIds int `json:"canonical_ids"`
-	Results []map[string]string `json:"results"`
+	MulticastId  int64               `json:"multicast_id"`
+	Success      int                 `json:"success"`
+	Failure      int                 `json:"failure"`
+	CanonicalIds int                 `json:"canonical_ids"`
+	Results      []map[string]string `json:"results"`
 }
 
 type PebbleRegistration struct {
 	RegistrationId string `json:"regid"`
-	RestAuthToken string `json:"auth"`
+	RestAuthToken  string `json:"auth"`
 }
 
 type PebbleMessage struct {
-	Title string `json:"title"`
-	Message string `json:"message"`
+	Title         string `json:"title"`
+	Message       string `json:"message"`
 	RestAuthToken string `json:"auth"`
 }
 
@@ -55,13 +55,13 @@ func readJSON(r io.Reader, v interface{}) error {
 }
 
 func deleteRegistrationId(context appengine.Context, registrationId string) error {
-        q := datastore.NewQuery("PebbleRegistration").
+	q := datastore.NewQuery("PebbleRegistration").
 		Filter("RegistrationId =", registrationId).
 		KeysOnly()
-	
-        keys, err := q.GetAll(context, nil)
-        if err != nil {
-                return err
+
+	keys, err := q.GetAll(context, nil)
+	if err != nil {
+		return err
 	}
 	return datastore.DeleteMulti(context, keys)
 }
@@ -72,9 +72,9 @@ func keysForRegistrationIdAndRestAuthToken(context appengine.Context, registrati
 		Filter("RestAuthToken =", auth).
 		KeysOnly()
 
-        keys, err := q.GetAll(context, nil)
-        if err != nil {
-                return nil, err
+	keys, err := q.GetAll(context, nil)
+	if err != nil {
+		return nil, err
 	}
 	return keys, nil
 }
@@ -97,13 +97,13 @@ var ErrSendGCMMessagePartiallyFailed = errors.New("Failed to queue some messages
 
 func sendGCMMessage(context appengine.Context, registrationIds []string, data map[string]string, dryRun bool) error {
 	jsonMessage := &GCMSend{
-		Data: data,
+		Data:            data,
 		RegistrationIds: registrationIds,
-		DryRun: dryRun,
+		DryRun:          dryRun,
 	}
 	log.Printf("Sending data: %#v\n", jsonMessage)
 	marshalledJson, err := json.Marshal(jsonMessage)
-	if err != nil{
+	if err != nil {
 		return err
 	}
 	req, err := http.NewRequest("POST", "https://android.googleapis.com/gcm/send", bytes.NewBuffer(marshalledJson))
@@ -113,7 +113,7 @@ func sendGCMMessage(context appengine.Context, registrationIds []string, data ma
 	req.Header.Add("Authorization", fmt.Sprintf("key=%s", API_KEY))
 	req.Header.Add("Content-Type", "application/json")
 
-	client := urlfetch.Client(context)	
+	client := urlfetch.Client(context)
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -121,7 +121,7 @@ func sendGCMMessage(context appengine.Context, registrationIds []string, data ma
 	log.Printf("%#v: %#v\n", resp.Status, resp)
 	var gcmResponse GCMResponse
 	readJSON(resp.Body, &gcmResponse)
-	
+
 	if gcmResponse.Success == 0 {
 		return ErrSendGCMMessageFailed
 	} else if gcmResponse.Failure > 0 {
@@ -147,28 +147,26 @@ func sendMessage(context appengine.Context, restAuthKey, title, message string) 
 		return ErrNoRegistrationFound
 	}
 	pebbleMessage := map[string]string{
-		"title": title,
+		"title":   title,
 		"message": message,
 	}
 	return sendGCMMessage(context, registrationIds, pebbleMessage, false)
 }
 
-
-
 func setRegistrationIdForAuthKey(context appengine.Context, registrationId, auth string) (err error) {
 	key := datastore.NewIncompleteKey(context, "PebbleRegistration", nil)
 	_, err = datastore.Put(context, key, &PebbleRegistration{
 		RegistrationId: registrationId,
-		RestAuthToken: auth,
+		RestAuthToken:  auth,
 	})
 	return
 }
 
 func registrationIdsForAuthKey(context appengine.Context, auth string) (registrationIds []string, err error) {
-	
+
 	q := datastore.NewQuery("PebbleRegistration").
 		Filter("RestAuthToken =", auth)
-	
+
 	var registrations []PebbleRegistration
 	_, err = q.GetAll(context, &registrations)
 	if err != nil {
@@ -186,7 +184,7 @@ func send(w http.ResponseWriter, r *http.Request) {
 	bodyDecoder := json.NewDecoder(r.Body)
 	var message PebbleMessage
 	bodyDecoder.Decode(&message)
-	
+
 	err := sendMessage(context, message.RestAuthToken, message.Title, message.Message)
 	if err != nil {
 		switch err {
