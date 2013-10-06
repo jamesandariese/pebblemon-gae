@@ -13,7 +13,7 @@ import (
 	"log"
 )
 
-var API_KEY string = "AIzaSyAAWkXHK9aRpWCDTws58_X0HIDDT0B7sVo"
+var API_KEY string = "CENSORED"
 
 type GCMSend struct {
 	Data map[string]string `json:"data"`
