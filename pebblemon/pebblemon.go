@@ -66,6 +66,31 @@ func deleteRegistrationId(context appengine.Context, registrationId string) erro
 	return datastore.DeleteMulti(context, keys)
 }
 
+func keysForRegistrationIdAndRestAuthToken(context appengine.Context, registrationId, auth string) ([]*datastore.Key, error) {
+	q := datastore.NewQuery("PebbleRegistration").
+		Filter("RegistrationId =", registrationId).
+		Filter("RestAuthToken =", auth).
+		KeysOnly()
+
+        keys, err := q.GetAll(context, nil)
+        if err != nil {
+                return nil, err
+	}
+	return keys, nil
+}
+
+func deleteDuplicateRegistrationIds(context appengine.Context, registrationId, auth string) error {
+	if keys, err := keysForRegistrationIdAndRestAuthToken(context, registrationId, auth); err == nil {
+		if len(keys) > 1 {
+			log.Printf("Deleting %d duplicates\n", len(keys[1:]))
+			return datastore.DeleteMulti(context, keys[1:])
+		}
+	} else {
+		return err
+	}
+	return nil
+}
+
 var ErrNoRegistrationFound = errors.New("No registration ID found for auth code")
 var ErrSendGCMMessageFailed = errors.New("Failed to queue message in GCM")
 var ErrSendGCMMessagePartiallyFailed = errors.New("Failed to queue some messages in GCM")
@@ -76,6 +101,7 @@ func sendGCMMessage(context appengine.Context, registrationIds []string, data ma
 		RegistrationIds: registrationIds,
 		DryRun: dryRun,
 	}
+	log.Printf("Sending data: %#v\n", jsonMessage)
 	marshalledJson, err := json.Marshal(jsonMessage)
 	if err != nil{
 		return err
@@ -197,14 +223,32 @@ func register(w http.ResponseWriter, r *http.Request) {
 
 	err := sendGCMMessage(context, []string{registration.RegistrationId}, map[string]string{"test": "test"}, true)
 	if err != nil {
-		w.WriteHeader(400)
-		fmt.Fprintf(w, "Invalid registration ID\n")
+		if err == ErrSendGCMMessageFailed || err == ErrSendGCMMessagePartiallyFailed {
+			w.WriteHeader(400)
+			fmt.Fprintf(w, "Invalid registration ID\n")
+		} else {
+			w.WriteHeader(500)
+			fmt.Fprintf(w, "Unknown error validating registration")
+		}
 		return
 	}
-	err = setRegistrationIdForAuthKey(context, registration.RegistrationId, registration.RestAuthToken)
+	keys, err := keysForRegistrationIdAndRestAuthToken(context, registration.RegistrationId, registration.RestAuthToken)
 	if err != nil {
 		w.WriteHeader(500)
-		fmt.Fprintf(w, "Unknown error registering device\n")
+		fmt.Fprintf(w, "Unknown error looking up potential duplicates\n")
+	}
+	if len(keys) == 0 {
+		err = setRegistrationIdForAuthKey(context, registration.RegistrationId, registration.RestAuthToken)
+		if err != nil {
+			w.WriteHeader(500)
+			fmt.Fprintf(w, "Unknown error registering device\n")
+			return
+		}
+	}
+	err = deleteDuplicateRegistrationIds(context, registration.RegistrationId, registration.RestAuthToken)
+	if err != nil {
+		w.WriteHeader(500)
+		fmt.Fprintf(w, "Unknown error deduplicating account\n")
 		return
 	}
 }
