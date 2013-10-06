@@ -43,6 +43,7 @@ type PebbleMessage struct {
 func init() {
 	http.HandleFunc("/register", register)
 	http.HandleFunc("/send", send)
+	http.HandleFunc("/unregister", unregister)
 	//http.HandleFunc("/test", testmessage)
 }
 
@@ -172,6 +173,16 @@ func send(w http.ResponseWriter, r *http.Request) {
 			log.Printf("%#v", err)
 		}
 	}
+}
+
+func unregister(w http.ResponseWriter, r *http.Request) {
+	context := appengine.NewContext(r)
+
+	bodyDecoder := json.NewDecoder(r.Body)
+	var registration PebbleRegistration
+	bodyDecoder.Decode(&registration)
+
+	deleteRegistrationId(context, registration.RegistrationId)
 }
 
 func register(w http.ResponseWriter, r *http.Request) {
